@@ -1,0 +1,11 @@
+[package]
+name = "nvme-devinfo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+devinfo = { git = "https://github.com/illumos/devinfo-rs", branch = "main" }
+
