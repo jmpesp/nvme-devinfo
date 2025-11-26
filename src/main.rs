@@ -1,13 +1,44 @@
-use std::process::Command;
-use std::collections::HashMap;
-use anyhow::bail;
 use anyhow::Result;
+use anyhow::bail;
+use glob::glob;
+use std::collections::HashMap;
 use std::path::Path;
+use std::process::Command;
 
 // Dump out all nvme devices seen, their devfs path, and their raw character
 // device path
 
 fn main() -> Result<()> {
+    // Cache the /dev/rdsk/ links
+    let rdsk_paths = {
+        let cwd = std::env::current_dir()?;
+        std::env::set_current_dir("/dev/rdsk")?;
+
+        let mut rdsk_paths: HashMap<String, String> = HashMap::new();
+        for entry in glob("/dev/rdsk/*")? {
+            let entry = entry?;
+            let link = std::fs::read_link(&entry)?;
+            if format!("{link:?}").contains(":wd") {
+                match std::fs::canonicalize(link) {
+                    Ok(link) => {
+                        rdsk_paths.insert(
+                            link.into_os_string().into_string().unwrap(),
+                            entry.into_os_string().into_string().unwrap(),
+                        );
+                    }
+
+                    Err(_) => {
+                        println!("{entry:?} => ?");
+                    }
+                }
+            }
+        }
+
+        std::env::set_current_dir(cwd)?;
+        rdsk_paths
+    };
+
+    // Find all nvme to create an instance map
     let cmd = Command::new("pfexec")
         .arg("nvmeadm")
         .arg("list")
@@ -21,7 +52,7 @@ fn main() -> Result<()> {
     let mut instance_map: HashMap<&str, (&str, &str)> = HashMap::new();
 
     for line in text.split("\n") {
-        if line.len() == 0 {
+        if line.is_empty() {
             continue;
         }
 
@@ -73,9 +104,11 @@ fn main() -> Result<()> {
 
             println!(">>> raw char device: {raw}");
 
-            if !Path::exists(&Path::new(&raw)) {
-                bail!("{raw} does not exist!");
+            if !Path::exists(Path::new(&raw)) {
+                bail!("{raw} does not exist! needs gpt, run zpool create");
             }
+
+            println!(">>> rdsk path: {:?}", rdsk_paths.get(&raw));
 
             times += 1;
         }
